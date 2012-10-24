@@ -18,8 +18,10 @@
 #   error "This will probably not work on Windows!"
 # endif
 
+
 // Prerequisites {{{1
 // purple includes {{{2
+# define PURPLE_PLUGINS
 # include <pidgin/gtkplugin.h>       // gtk stuff
 # include <libpurple/cmds.h>         // purple_cmd_xxx
 # include <libpurple/conversation.h> // purple_conversation_xxx
