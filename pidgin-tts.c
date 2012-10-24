@@ -1,70 +1,81 @@
 /*
- * pidgin-tts.c
- * pidgin-tts plugin
+ * File:        pidgin-tts.c
+ * Author:      Thomas Gläßle
+ * Version:     1.1
+ * License:     free
+ *
+ * Description:
+ * Source file for text-to-speech (tts) plugin for pidgin.
+ * Designed for use with the `espeak` utility.
+ *
+ * Installation:
+ * May be as simple as typing
+ *  make && make install
+ * and activating the plugin in your pidgin options.
  */
 
-#ifndef G_GNUC_NULL_TERMINATED
-#  if __GNUC__ >= 4
-#    define G_GNUC_NULL_TERMINATED __attribute__((__sentinel__))
-#  else
-#    define G_GNUC_NULL_TERMINATED
-#  endif /* __GNUC__ >= 4 */
-#endif /* G_GNUC_NULL_TERMINATED */
+# ifdef _WIN32
+#   error "This will probably not work on Windows!"
+# endif
 
-#define PURPLE_PLUGINS
+// Prerequisites {{{1
+# ifndef G_GNUC_NULL_TERMINATED
+#   if __GNUC__ >= 4
+#     define G_GNUC_NULL_TERMINATED __attribute__((__sentinel__))
+#   else
+#     define G_GNUC_NULL_TERMINATED
+#   endif /* __GNUC__ >= 4 */
+# endif /* G_GNUC_NULL_TERMINATED */
 
+# define PURPLE_PLUGINS
 
-/*--------------------------------------------------
-// purple includes
-*--------------------------------------------------*/ 
-#include <pidgin/gtkplugin.h>       /* gtk stuff */
-#include <libpurple/cmds.h>         /* purple_cmd_xxx */
-#include <libpurple/conversation.h> /* purple_conversation_xxx */
-#include <libpurple/debug.h>        /* purple_debug_xxx */
-#include <libpurple/prefs.h>        /* purple_pref_xxx */
-#include <libpurple/signals.h>      /* purple_signal_xxx, ... */
-#include <libpurple/util.h>         /* purple_str_xxx */
-#include <libpurple/version.h>
+// purple includes {{{2
+# include <pidgin/gtkplugin.h>       /* gtk stuff */
+# include <libpurple/cmds.h>         /* purple_cmd_xxx */
+# include <libpurple/conversation.h> /* purple_conversation_xxx */
+# include <libpurple/debug.h>        /* purple_debug_xxx */
+# include <libpurple/prefs.h>        /* purple_pref_xxx */
+# include <libpurple/signals.h>      /* purple_signal_xxx, ... */
+# include <libpurple/util.h>         /* purple_str_xxx */
+# include <libpurple/version.h>
 
-#ifdef _WIN32
-#include <windows.h>
-#endif
+// system includes {{{2
+# include <stdio.h>
+# include <stdarg.h>     /* va_list ... */
+# include <string.h>
+# include <unistd.h>     /* write, close */
+# include <errno.h>
+# include <sys/types.h>
 
-/*--------------------------------------------------
-* system includes
-*--------------------------------------------------*/ 
-#include <stdio.h>
-#include <stdarg.h>     /* va_list ... */
-#include <string.h>
-#include <unistd.h>     /* write, close */
-#include <errno.h>
-#include <sys/types.h>
+// global constants {{{2
+# define PLUGIN_ID      "qjuh-pidgin-tts"
+# define PLUGIN_NAME    "Pidgin-eSpeak"
 
-#ifndef _WIN32
-#include <sys/wait.h>
-#endif
+# define PREFS_BASE     "/plugins/core/pidgin-tts"
+# define PREFS_ACTIVE   PREFS_BASE "/active"
+# define PREFS_REPLACE  PREFS_BASE "/replace"
+# define PREFS_SHELL    PREFS_BASE "/shell"
+# define PREFS_COMMAND  PREFS_BASE "/command"
+# define PREFS_PARAM    PREFS_BASE "/params"
+# define PREFS_KEYWORDS PREFS_BASE "/keywords"
+# define PREFS_KEYS_ON  PREFS_BASE "/keywords-active"
 
+# define PREFS_LANGUAGE PREFS_BASE "/language"
+# define PREFS_VOLUME   PREFS_BASE "/volume"
 
-/*--------------------------------------------------
-* global variables
-*--------------------------------------------------*/ 
+# define DEFAULT_LANGUAGE   "de"
+# define DEFAULT_VOLUME     "200"
+# define DEFAULT_SHELL      "/bin/sh"
+# define DEFAULT_TTS        "/usr/bin/espeak"
 
-#define PLUGIN_ID       "qjuh-pidgin-tts"
-#define PLUGIN_NAME     "Pidgin-eSpeak"
+# define CMD_TTS "tts"
 
-#define PREFS_BASE      "/plugins/core/pidgin-tts"
-#define PREFS_ACTIVE    PREFS_BASE "/active"
-#define PREFS_REPLACE   PREFS_BASE "/replace"
-#define PREFS_SHELL     PREFS_BASE "/shell"
-#define PREFS_COMMAND   PREFS_BASE "/command"
-#define PREFS_PARAM     PREFS_BASE "/params"
-#define PREFS_KEYWORDS  PREFS_BASE "/keywords"
-#define PREFS_KEYS_ON   PREFS_BASE "/keywords-active"
+// forward declarations {{{2
+static void plugin_init(PurplePlugin *plugin);
+static gboolean plugin_load(PurplePlugin *plugin);
+static gboolean plugin_unload(PurplePlugin * plugin);
 
-#define CMD_TTS "tts"
-
-
-// plugin internals:
+// instance variables {{{2
 static PurplePlugin *me;
 static int tts_queue_stdin, tts_queue_pid,
            tts_command_id_global, tts_command_id_conversation,
@@ -72,11 +83,42 @@ static int tts_queue_stdin, tts_queue_pid,
 static GList* active_conversations;
 static GList* inactive_conversations;
 
+// Export plugin {{{1
+static PurplePluginInfo pluginInfo =
+{
+    PURPLE_PLUGIN_MAGIC,
+    PURPLE_MAJOR_VERSION,
+    PURPLE_MINOR_VERSION,
+    PURPLE_PLUGIN_STANDARD,                             // type
+    PIDGIN_PLUGIN_TYPE,                                 // ui_requirement
+    0,                                                  // flags
+    NULL,                                               // dependencies
+    PURPLE_PRIORITY_DEFAULT,                            // priority
 
-/*--------------------------------------------------
-* utility functions:
-*--------------------------------------------------*/ 
+    PLUGIN_ID,                                          // id
+    PLUGIN_NAME,                                        // name
+    "1.1",                                              // version
+    "Read incoming text messages.",                     // summary
+    "This plugin speaks out all incoming text messages via espeak.",
+    "Thomas Gläßle <t_glaessle@gmx.de>",                // author
+    "https://github.com/thomas-glaessle/pidgin-tts",    // homepage
+    plugin_load,                                        // load
+    plugin_unload,                                      // unload
+    NULL,                                               // destroy
+    NULL,                                               // ui_info
+    NULL,                                               // extra_info
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL
+};
 
+PURPLE_INIT_PLUGIN(PidginEspeak, plugin_init, pluginInfo)
+
+
+// Utility functions {{{1
 void systemlog(PurpleConversation *conv, const gchar* format, ...) __attribute__((format(printf,2,3)));
 void systemlog(PurpleConversation *conv, const gchar* format, ...)
 {
@@ -87,12 +129,10 @@ void systemlog(PurpleConversation *conv, const gchar* format, ...)
     str = g_strdup_vprintf(format, ap);
     va_end(ap);
 
-    purple_conversation_write(conv, NULL, str,
-            PURPLE_MESSAGE_SYSTEM | PURPLE_MESSAGE_NO_LOG | PURPLE_MESSAGE_ACTIVE_ONLY,
-            0);
-            /*--------------------------------------------------
-            * time(NULL));
-            *--------------------------------------------------*/ 
+    purple_conversation_write(
+        conv, NULL, str,
+        PURPLE_MESSAGE_SYSTEM | PURPLE_MESSAGE_NO_LOG | PURPLE_MESSAGE_ACTIVE_ONLY,
+        0); /* time(NULL)); */ 
 
     g_free(str);
 }
@@ -106,8 +146,7 @@ int strwrite(int fd, ...)
 
     written = 0;
     va_start(ap, fd);
-    while (str = va_arg(ap, gchar*))
-    {
+    while (str = va_arg(ap, gchar*)) {
         c = write(fd, str, strlen(str));
         if (c < 0)
             return c;
@@ -117,7 +156,6 @@ int strwrite(int fd, ...)
     return written;
 }
 
-
 GList* list_find(GList* list, const gchar* str, int step)
 {
     for ( ; list; list = g_list_nth(list, step))
@@ -126,52 +164,123 @@ GList* list_find(GList* list, const gchar* str, int step)
     return list;
 }
 
+// spawn a process
+GPid spawn(const gchar *cmd, const gchar *opts[], int copts, int *infp, int *outfp)
+{
+    int i;
+    gchar **opt;
+    GPid pid = 0;
 
-/*--------------------------------------------------
-* Global preferences
-*--------------------------------------------------*/ 
+    // create argv
+    opt = malloc((copts+2)*sizeof(gchar*));
+    opt[0] = g_strdup(cmd);
+    for (i = 0; i < copts; i++)
+        opt[i+1] = g_strdup(opts[i]);
+    opt[copts+1] = NULL;
 
-/* getters */
-static gboolean pref_get_active() {
-    return purple_prefs_get_bool(PREFS_ACTIVE); } 
-static const gchar* pref_get_command() {
-    return purple_prefs_get_string(PREFS_COMMAND); } 
-static const gchar* pref_get_shell() {
-    return purple_prefs_get_string(PREFS_SHELL); }
-static const gchar* pref_get_param() {
-    return purple_prefs_get_string(PREFS_PARAM); }
-static gboolean pref_get_keywords_active() {
-    return purple_prefs_get_bool(PREFS_KEYS_ON); }
+    g_spawn_async_with_pipes(
+            NULL,           // inherit current working directory
+            opt,            // argv
+            NULL,           // envp
+            G_SPAWN_STDOUT_TO_DEV_NULL|G_SPAWN_STDERR_TO_DEV_NULL,
+            NULL,           // SetupFunction
+            NULL,           // USERDATA
+            &pid,           // child PID
+            infp,           // child's STDIN
+            outfp,          // child's STDOUT
+            NULL,           // child's STDERR
+            NULL            // error
+        );
 
-/* setters */
-static void pref_set_active(gboolean active) {
-    purple_prefs_set_bool(PREFS_ACTIVE, active); }
-static void pref_set_command(const gchar* cmd) {
-    purple_prefs_set_string(PREFS_COMMAND, cmd); }
-static void pref_set_shell(const gchar* sh) {
-    purple_prefs_set_string(PREFS_SHELL, sh); }
-static void pref_set_param(const gchar* param) {
-    purple_prefs_set_string(PREFS_PARAM, param); }
-static void pref_set_keywords_active(gboolean active) {
-    purple_prefs_set_bool(PREFS_KEYS_ON, active); }
+    for (i = 0; i < copts; ++i)
+        g_free(opt[i+1]);
+    free(opt);
 
-/* logging */
-static void pref_log_active(PurpleConversation *conv) {
-    systemlog(conv, PLUGIN_NAME " is %s", (pref_get_active() ? "enabled" : "disabled")); }
-static void pref_log_shell(PurpleConversation *conv) {
-    systemlog(conv, PLUGIN_NAME " shell is: %s", pref_get_shell()); }
-static void pref_log_command(PurpleConversation *conv) {
-    systemlog(conv, PLUGIN_NAME " command is: %s", pref_get_command()); }
-static void pref_log_param(PurpleConversation *conv) {
-    systemlog(conv, PLUGIN_NAME " parameters are: %s", pref_get_param()); }
-static void pref_log_keywords_active(PurpleConversation *conv) {
-    systemlog(conv, PLUGIN_NAME " keywords are: %s", (pref_get_keywords_active() ? "enabled" : "disabled")); }
+    return pid;
+}
+
+// Global preferences {{{1
+
+/* getters {{{2 */
+static gboolean pref_get_active()
+{
+    return purple_prefs_get_bool(PREFS_ACTIVE);
+} 
+
+static const gchar* pref_get_command()
+{
+    return purple_prefs_get_string(PREFS_COMMAND);
+} 
+
+static const gchar* pref_get_shell()
+{
+    return purple_prefs_get_string(PREFS_SHELL);
+}
+
+static const gchar* pref_get_param()
+{
+    return purple_prefs_get_string(PREFS_PARAM);
+}
+
+static gboolean pref_get_keywords_active()
+{
+    return purple_prefs_get_bool(PREFS_KEYS_ON);
+}
+
+/* setters {{{2 */
+static void pref_set_active(gboolean active)
+{
+    purple_prefs_set_bool(PREFS_ACTIVE, active);
+}
+
+static void pref_set_command(const gchar* cmd)
+{
+    purple_prefs_set_string(PREFS_COMMAND, cmd);
+}
+
+static void pref_set_shell(const gchar* sh)
+{
+    purple_prefs_set_string(PREFS_SHELL, sh);
+}
+
+static void pref_set_param(const gchar* param)
+{
+    purple_prefs_set_string(PREFS_PARAM, param);
+}
+
+static void pref_set_keywords_active(gboolean active)
+{
+    purple_prefs_set_bool(PREFS_KEYS_ON, active);
+}
+
+/* logging {{{2 */
+static void pref_log_active(PurpleConversation *conv)
+{
+    systemlog(conv, PLUGIN_NAME " is %s", (pref_get_active() ? "enabled" : "disabled"));
+}
+
+static void pref_log_shell(PurpleConversation *conv)
+{
+    systemlog(conv, PLUGIN_NAME " shell is: %s", pref_get_shell());
+}
+
+static void pref_log_command(PurpleConversation *conv)
+{
+    systemlog(conv, PLUGIN_NAME " command is: %s", pref_get_command());
+}
+
+static void pref_log_param(PurpleConversation *conv)
+{
+    systemlog(conv, PLUGIN_NAME " parameters are: %s", pref_get_param());
+}
+
+static void pref_log_keywords_active(PurpleConversation *conv)
+{
+    systemlog(conv, PLUGIN_NAME " keywords are: %s", (pref_get_keywords_active() ? "enabled" : "disabled"));
+}
 
 
-/*--------------------------------------------------
-* keywords
-*--------------------------------------------------*/ 
-
+// Keyword management {{{1
 static void pref_delete_keyword(const gchar* keyword)
 {
     GList *table = purple_prefs_get_string_list(PREFS_KEYWORDS),
@@ -215,11 +324,7 @@ static void pref_log_keywords(PurpleConversation *conv)
 }
 
 
-
-/*--------------------------------------------------
-* replacement table
-*--------------------------------------------------*/ 
-
+// Replacement table {{{1
 static void pref_delete_replace(const gchar* pattern)
 {
     GList *table = purple_prefs_get_string_list(PREFS_REPLACE),
@@ -258,21 +363,22 @@ static void pref_log_replace(PurpleConversation *conv)
     g_free(str);
 }
 
+// Conversation preferences {{{1
+/* getters {{{2 */
+static gboolean conv_get_active(PurpleConversation *conv)
+{
+    return g_list_find(active_conversations, conv) != NULL;
+} 
 
-/*--------------------------------------------------
-* Conversation preferences
-*--------------------------------------------------*/ 
+static gboolean conv_get_inactive(PurpleConversation *conv)
+{
+    return g_list_find(inactive_conversations, conv) != NULL;
+} 
 
-/* getters */
-static gboolean conv_get_active(PurpleConversation *conv) {
-    return g_list_find(active_conversations, conv) != NULL; } 
-static gboolean conv_get_inactive(PurpleConversation *conv) {
-    return g_list_find(inactive_conversations, conv) != NULL; } 
-
+/* setters {{{2 */
 static void conv_set_active(PurpleConversation *conv, gboolean active);
 static void conv_set_inactive(PurpleConversation *conv, gboolean inactive);
 
-/* setters */
 static void conv_set_active(PurpleConversation *conv, gboolean active)
 {
     if (active) {
@@ -293,67 +399,20 @@ static void conv_set_inactive(PurpleConversation *conv, gboolean inactive)
         inactive_conversations = g_list_remove(inactive_conversations, conv);
 }
 
-/* logging */
+/* logging {{{2 */
 static void conv_log_active(PurpleConversation *conv) {
     if (conv_get_active(conv) || conv_get_inactive(conv))
-        systemlog(conv, PLUGIN_NAME " is %s for this conversation",
-                (conv_get_active(conv) ? "enabled" : "disabled"));
+        systemlog(
+            conv, PLUGIN_NAME " is %s for this conversation",
+            (conv_get_active(conv) ? "enabled" : "disabled"));
     else
-        systemlog(conv, PLUGIN_NAME " uses the default setting (%s) for this conversation", 
-                (pref_get_active() ? "enabled" : "disabled"));
+        systemlog(
+            conv, PLUGIN_NAME " uses the default setting (%s) for this conversation", 
+            (pref_get_active() ? "enabled" : "disabled"));
 }
 
-
-
-
-/*--------------------------------------------------
-* spawn a process:
-*--------------------------------------------------*/ 
-
-# ifdef _WIN32
-#   error "This remains to be implemented for win32!"
-# else
-GPid spawn(const gchar *cmd, const gchar *opts[], int copts, int *infp, int *outfp)
-{
-    int i;
-    gchar **opt;
-    GPid pid = 0;
-
-    // create argv
-    opt = malloc((copts+2)*sizeof(gchar*));
-    opt[0] = g_strdup(cmd);
-    for (i = 0; i < copts; i++)
-        opt[i+1] = g_strdup(opts[i]);
-    opt[copts+1] = NULL;
-
-    g_spawn_async_with_pipes(
-            NULL,           // inherit current working directory
-            opt,            // argv
-            NULL,           // envp
-            G_SPAWN_STDOUT_TO_DEV_NULL|G_SPAWN_STDERR_TO_DEV_NULL,
-            NULL,           // SetupFunction
-            NULL,           // USERDATA
-            &pid,           // child PID
-            infp,           // child's STDIN
-            outfp,          // child's STDOUT
-            NULL,           // child's STDERR
-            NULL            // error
-        );
-
-    for (i = 0; i < copts; ++i)
-        g_free(opt[i+1]);
-    free(opt);
-
-    return pid;
-}
-# endif
-
-
-
-/*--------------------------------------------------
-* analyse message text
-*--------------------------------------------------*/ 
-
+// Business logic {{{1
+// analyse message text {{{2
 static gboolean analyse(const gchar* _buffer, gchar **text)
 {
     GList* table;
@@ -377,11 +436,7 @@ static gboolean analyse(const gchar* _buffer, gchar **text)
     return TRUE;
 }
 
-
-/*--------------------------------------------------
-* execute espeak
-*--------------------------------------------------*/ 
-
+// execute espeak {{{2
 static gboolean tts(PurpleConversation *conv, gchar *message)
 {
     purple_debug_info(PLUGIN_NAME, "Echoing: '%s'\n", message);
@@ -397,10 +452,7 @@ static gboolean tts(PurpleConversation *conv, gchar *message)
     return TRUE;
 }
 
-/*--------------------------------------------------
-* incoming message
-*--------------------------------------------------*/ 
-
+// incoming message {{{2
 static gboolean process_message(PurpleConversation *conv, const gchar* message)
 {
     gchar* text;
@@ -431,7 +483,6 @@ static gboolean process_message(PurpleConversation *conv, const gchar* message)
     return TRUE;
 }
 
-
 static gboolean message_receive(PurpleAccount *account, const gchar *who, gchar *message, PurpleConversation *conv, PurpleMessageFlags flags)
 {
     process_message(conv, message);
@@ -439,12 +490,13 @@ static gboolean message_receive(PurpleAccount *account, const gchar *who, gchar 
 }
 
 
-/*--------------------------------------------------
-* command
-*--------------------------------------------------*/ 
-
-static PurpleCmdRet
-tts_command_keyword(PurpleConversation *conv, const gchar *cmd, gchar **args, gchar **error, void *data)
+// CLI {{{1
+static PurpleCmdRet tts_command_keyword(
+        PurpleConversation *conv,
+        const gchar *cmd,
+        gchar **args,
+        gchar **error,
+        void *data)
 {
     if (args[0] == NULL || !purple_strequal(args[0], "keyword"))
         return PURPLE_CMD_RET_CONTINUE;
@@ -484,8 +536,12 @@ tts_command_keyword(PurpleConversation *conv, const gchar *cmd, gchar **args, gc
     return PURPLE_CMD_RET_OK;
 }
 
-static PurpleCmdRet
-tts_command_replace(PurpleConversation *conv, const gchar *cmd, gchar **args, gchar **error, void *data)
+static PurpleCmdRet tts_command_replace(
+        PurpleConversation *conv,
+        const gchar *cmd,
+        gchar **args,
+        gchar **error,
+        void *data)
 {
     if (args[0] == NULL || !purple_strequal(args[0], "replace"))
         return PURPLE_CMD_RET_CONTINUE;
@@ -504,9 +560,12 @@ tts_command_replace(PurpleConversation *conv, const gchar *cmd, gchar **args, gc
     return PURPLE_CMD_RET_OK;
 }
 
-
-static PurpleCmdRet
-tts_command_conv(PurpleConversation *conv, const gchar *cmd, gchar **args, gchar **error, void *data)
+static PurpleCmdRet tts_command_conv(
+        PurpleConversation *conv,
+        const gchar *cmd,
+        gchar **args,
+        gchar **error,
+        void *data)
 {
     if (args[0] == NULL || !purple_strequal(args[0], "buddy"))
         return PURPLE_CMD_RET_CONTINUE;
@@ -536,8 +595,12 @@ tts_command_conv(PurpleConversation *conv, const gchar *cmd, gchar **args, gchar
     return PURPLE_CMD_RET_OK;
 }
 
-static PurpleCmdRet
-tts_command(PurpleConversation *conv, const gchar *cmd, gchar **args, gchar **error, void *data)
+static PurpleCmdRet tts_command(
+        PurpleConversation *conv,
+        const gchar *cmd,
+        gchar **args,
+        gchar **error,
+        void *data)
 {
     if (args[0] == NULL) {
         pref_log_active(conv);
@@ -624,16 +687,30 @@ tts_command(PurpleConversation *conv, const gchar *cmd, gchar **args, gchar **er
 
 
 
-/*--------------------------------------------------
-* onload
-*--------------------------------------------------*/ 
+// Initialization {{{1
+static void plugin_init(PurplePlugin *plugin)
+{
+    purple_prefs_add_none(PREFS_BASE);
+    purple_prefs_add_bool(PREFS_ACTIVE, FALSE);
+    purple_prefs_add_string(PREFS_PARAM, "-v de -a 200");
+
+    purple_prefs_add_string(PREFS_LANGUAGE, DEFAULT_LANGUAGE);
+    purple_prefs_add_string(PREFS_VOLUME,   DEFAULT_VOLUME);
+
+    purple_prefs_add_string_list(PREFS_REPLACE, NULL);
+    purple_prefs_add_string_list(PREFS_KEYWORDS, NULL);
+    purple_prefs_add_bool(PREFS_KEYS_ON, FALSE);
+
+    purple_prefs_add_string(PREFS_SHELL,   DEFAULT_SHELL);
+    purple_prefs_add_string(PREFS_COMMAND, DEFAULT_TTS);
+}
 
 static gboolean plugin_load(PurplePlugin *plugin)
 {
-
     void *conv_handle = purple_conversations_get_handle();
-    gchar *info_keyword = "/"CMD_TTS" keyword [add &lt;keyword&gt; | remove &lt;keyword&gt;]",
-         *info_replace = "/"CMD_TTS" replace &lt;word&gt; &lt;replacement&gt;",
+    gchar
+        *info_keyword = "/"CMD_TTS" keyword [add &lt;keyword&gt; | remove &lt;keyword&gt;]",
+        *info_replace = "/"CMD_TTS" replace &lt;word&gt; &lt;replacement&gt;",
         *info = "/"CMD_TTS" [on | off | param &lt;parameters&gt; | shell &lt;path&gt; | command &lt;path&gt; | say &lt;text&gt; | status]",
         *info_stts = "/"CMD_TTS" buddy [on | off]";
 
@@ -686,8 +763,8 @@ static gboolean plugin_load(PurplePlugin *plugin)
             NULL );                             /* Any special user-defined data */
 
 
-    // to do: add commands to show/edit replacement table !!
-    // to do: add command to stop espeak output and clear shell input buffer !!
+    // TODO: add commands to show/edit replacement table !!
+    // TODO: add command to stop espeak output and clear shell input buffer !!
 
     // register message handler
     purple_signal_connect(conv_handle, "received-im-msg",
@@ -700,11 +777,6 @@ static gboolean plugin_load(PurplePlugin *plugin)
 
     return TRUE;
 }
-
-
-/*--------------------------------------------------
-* unload
-*--------------------------------------------------*/ 
 
 static gboolean plugin_unload(PurplePlugin * plugin)
 {
@@ -722,7 +794,7 @@ static gboolean plugin_unload(PurplePlugin * plugin)
 
     // close connection to child
     close(tts_queue_stdin);
-    // to do: wait for child?
+    // TODO: wait for child?
     tts_queue_stdin = 0;
     tts_queue_pid =0;
 
@@ -732,56 +804,5 @@ static gboolean plugin_unload(PurplePlugin * plugin)
     me = NULL;
     return TRUE;
 }
-
-
-
-/*--------------------------------------------------
-* plugin description:
-*--------------------------------------------------*/ 
-
-static PurplePluginInfo info =
-{
-    PURPLE_PLUGIN_MAGIC,
-    PURPLE_MAJOR_VERSION,
-    PURPLE_MINOR_VERSION,
-    PURPLE_PLUGIN_STANDARD,                           /**< type           */
-    PIDGIN_PLUGIN_TYPE,                               /**< ui_requirement */
-    0,                                                /**< flags          */
-    NULL,                                             /**< dependencies   */
-    PURPLE_PRIORITY_DEFAULT,                          /**< priority       */
-
-    PLUGIN_ID,                                        /**< id             */
-    PLUGIN_NAME,                                      /**< name           */
-    "1.1",                                            /**< version        */
-    "Read incoming text messages.",                   /**  summary        */
-    "This plugin speaks out all incoming text messages via espeak.",
-    "Thomas Gläßle <t_glaessle@gmx.de>",              /**< author         */
-    NULL,                                             /**< homepage       */
-    plugin_load,                                      /**< load           */
-    plugin_unload,                                    /**< unload         */
-    NULL,                                             /**< destroy        */
-    NULL,                                             /**< ui_info        */
-    NULL,                                             /**< extra_info     */
-    NULL,
-    NULL,
-    NULL,
-    NULL,
-    NULL,
-    NULL
-};
-
-static void init_plugin(PurplePlugin *plugin)
-{
-    purple_prefs_add_none(PREFS_BASE);
-    purple_prefs_add_bool(PREFS_ACTIVE, FALSE);
-    purple_prefs_add_string(PREFS_PARAM, "-v de -a 200");
-    purple_prefs_add_string_list(PREFS_REPLACE, NULL);
-    purple_prefs_add_string_list(PREFS_KEYWORDS, NULL);
-    purple_prefs_add_bool(PREFS_KEYS_ON, FALSE);
-
-    purple_prefs_add_string(PREFS_SHELL, "/bin/sh");
-    purple_prefs_add_string(PREFS_COMMAND, "/usr/bin/espeak");
-}
-
-PURPLE_INIT_PLUGIN(PidginEspeak, init_plugin, info)
+// 1}}}
 
