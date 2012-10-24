@@ -1,9 +1,8 @@
-#
-# pidgin-latex Makefile
-#
-# Copyright 2004-2009 Edouard Geuten <thegrima AT altern DOT org>
+# Copyright 2012 Thomas Gläßle < t [underscore] glaessle [at] gmx [dot] de >
 #
 # Heavily inspired and copied from :
+# pidgin-latex Makefile
+# Copyright 2004-2009 Edouard Geuten <thegrima AT altern DOT org>
 # Gaim Extended Preferences Plugin Main Makefile
 # Copyright 2004-2009 Kevin Stange <extprefs@simguy.net>
 #
@@ -33,11 +32,11 @@ endif
 
 PIDGIN_ESPEAK = pidgin-tts
 
-PIDGIN_CFLAGS  = $(shell pkg-config pidgin --cflags)
-GTK_CFLAGS   = $(shell pkg-config gtk+-2.0 --cflags)
-PIDGIN_LIBS    = $(shell pkg-config pidgin --libs)
-GTK_LIBS     = $(shell pkg-config gtk+-2.0 --libs)
-PIDGIN_LIBDIR  = $(shell pkg-config --variable=libdir pidgin)/pidgin
+PIDGIN_CFLAGS   = $(shell pkg-config pidgin   --cflags)
+GTK_CFLAGS      = $(shell pkg-config gtk+-2.0 --cflags)
+PIDGIN_LIBS     = $(shell pkg-config pidgin   --libs)
+GTK_LIBS        = $(shell pkg-config gtk+-2.0 --libs)
+PIDGIN_LIBDIR   = $(shell pkg-config --variable=libdir pidgin)/pidgin
 
 all: $(PIDGIN_ESPEAK).so
 
