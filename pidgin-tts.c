@@ -36,8 +36,7 @@
 #include <stdio.h>
 #include <stdarg.h>     /* va_list ... */
 #include <string.h>
-#include <fcntl.h>      /* open, O_CREAT, .. */
-#include <unistd.h>     /* fork, exec, pipe, dup2, write, close */
+#include <unistd.h>     /* write, close */
 #include <errno.h>
 #include <sys/types.h>
 
@@ -311,15 +310,9 @@ static void conv_log_active(PurpleConversation *conv) {
 * spawn a process:
 *--------------------------------------------------*/ 
 
-#ifdef _WIN32
-# error "This remains to be implemented for win32!"
-#else
-
-
-
-/*--------------------------------------------------
-* pid_t spawn(const gchar *cmd, const gchar *opts[], int copts, int *infp, int *outfp)
-*--------------------------------------------------*/ 
+# ifdef _WIN32
+#   error "This remains to be implemented for win32!"
+# else
 GPid spawn(const gchar *cmd, const gchar *opts[], int copts, int *infp, int *outfp)
 {
     int i;
@@ -352,69 +345,8 @@ GPid spawn(const gchar *cmd, const gchar *opts[], int copts, int *infp, int *out
     free(opt);
 
     return pid;
-
-
-    /*--------------------------------------------------
-    * int i;
-    * int p_stdin[2], p_stdout[2];
-    * gchar **opt = NULL;
-    * pid_t pid;
-    * 
-    * // create pipes
-    * if (pipe(p_stdin) != 0 || pipe(p_stdout) != 0)
-    *     return -1;
-    * 
-    * purple_debug_info(PLUGIN_NAME, "Spawning: '%s' with %d parameters\n", cmd, copts);
-    * 
-    * // launch child process
-    * pid = fork();
-    * if (pid < 0)        // error return
-    *     return pid;
-    * else if (pid)  // child process: execute command
-    * {
-    *     close(p_stdin[STDOUT_FILENO]);
-    *     dup2(p_stdin[STDIN_FILENO], STDIN_FILENO);
-    *     close(p_stdout[STDIN_FILENO]);
-    *     dup2(p_stdout[STDOUT_FILENO], STDOUT_FILENO);
-    * 
-    *     // create argv
-    *     opt = malloc((copts+2)*sizeof(gchar*));
-    *     opt[0] = g_strdup(cmd);
-    *     for (i = 0; i < copts; i++)
-    *         opt[i+1] = g_strdup(opts[i]);
-    *     opt[copts+1] = NULL;
-    * 
-    *     // execv(cmd, opt);
-    *     execvp(cmd, opt);
-    * 
-    *     for (i = 0; i < copts; ++i)
-    *         g_free(opt[i+1]);
-    *     free(opt);
-    * 
-    *     int errlog = open("~/errorlog.txt",
-    *             O_WRONLY | O_CREAT | O_APPEND,
-    *             S_IWUSR|S_IRUSR | S_IWGRP|S_IRGRP | S_IWOTH|S_IROTH  );
-    *     strwrite(errlog, "Failed to execute: ", cmd, "\nReason: ", strerror(errno), "\n", NULL);
-    *     close(errlog);
-    *     exit(1);
-    * }
-    * 
-    * // parent process: return pipe handles to user
-    * if (infp == NULL)
-    *     close(p_stdin[STDOUT_FILENO]);
-    * else
-    *     *infp = p_stdin[STDOUT_FILENO];
-    * if (outfp == NULL)
-    *     close(p_stdout[STDIN_FILENO]);
-    * else
-    *     *outfp = p_stdout[STDIN_FILENO];
-    * 
-	* close(p_stdin[STDIN_FILENO]); // We only write to the forks input anyway
-	* close(p_stdout[STDOUT_FILENO]); // and we only read from its output
-    * return pid;
-    *--------------------------------------------------*/ 
 }
-#endif
+# endif
 
 
 
@@ -820,11 +752,10 @@ static PurplePluginInfo info =
 
     PLUGIN_ID,                                        /**< id             */
     PLUGIN_NAME,                                      /**< name           */
-    "1.0",                                            /**< version        */
-    "Speak all incoming text messages out loud.",     /**  summary        */
-    /**  description    */
+    "1.1",                                            /**< version        */
+    "Read incoming text messages.",                   /**  summary        */
     "This plugin speaks out all incoming text messages via espeak.",
-    "Thomas Glaessle <t_glaessle@gmx.de>",            /**< author       */
+    "Thomas Gläßle <t_glaessle@gmx.de>",              /**< author         */
     NULL,                                             /**< homepage       */
     plugin_load,                                      /**< load           */
     plugin_unload,                                    /**< unload         */
