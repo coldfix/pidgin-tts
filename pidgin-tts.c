@@ -20,8 +20,17 @@
 
 
 // Prerequisites {{{1
-// purple includes {{{2
+// compiler flags {{{2
+# ifndef G_GNUC_NULL_TERMINATED
+#  if __GNUC__ >= 4
+#    define G_GNUC_NULL_TERMINATED __attribute__((__sentinel__))
+#  else
+#    define G_GNUC_NULL_TERMINATED
+#  endif /* __GNUC__ >= 4 */
+# endif /* G_GNUC_NULL_TERMINATED */
 # define PURPLE_PLUGINS
+
+// purple includes {{{2
 # include <pidgin/gtkplugin.h>       // gtk stuff
 # include <libpurple/cmds.h>         // purple_cmd_xxx
 # include <libpurple/conversation.h> // purple_conversation_xxx
@@ -39,28 +48,70 @@
 # include <errno.h>
 # include <sys/types.h>
 
-// global constants {{{2
+// plugin info {{{2
 # define PLUGIN_ID      "qjuh-pidgin-tts"
 # define PLUGIN_NAME    "Pidgin-eSpeak"
 
+// purple config pathes {{{2
 # define PREFS_BASE     "/plugins/core/pidgin-tts"
 # define PREFS_ACTIVE   PREFS_BASE "/active"
-# define PREFS_REPLACE  PREFS_BASE "/replace"
 # define PREFS_SHELL    PREFS_BASE "/shell"
-# define PREFS_COMMAND  PREFS_BASE "/command"
-# define PREFS_PARAM    PREFS_BASE "/params"
-# define PREFS_KEYWORDS PREFS_BASE "/keywords"
-# define PREFS_KEYS_ON  PREFS_BASE "/keywords-active"
 
-# define PREFS_LANGUAGE PREFS_BASE "/language"
-# define PREFS_VOLUME   PREFS_BASE "/volume"
+# define PREFS_BUDDY    PREFS_BASE "/buddy/%s"
 
-# define DEFAULT_LANGUAGE   "de"
-# define DEFAULT_VOLUME     "200"
-# define DEFAULT_SHELL      "/bin/sh"
-# define DEFAULT_TTS        "/usr/bin/espeak"
+# define PREFS_PROFILE  PREFS_BASE    "/profile"
+# define PREFS_PROFILES PREFS_BASE    "/profile/%s"
+# define PREFS_COMMAND  PREFS_PROFILES  "/command"
+# define PREFS_COMPOSE  PREFS_PROFILES  "/compose"
+# define PREFS_LANGUAGE PREFS_PROFILES  "/language"
+# define PREFS_VOLUME   PREFS_PROFILES  "/volume"
+# define PREFS_REPLACE  PREFS_PROFILES  "/replace"
+# define PREFS_KEYWORDS PREFS_PROFILES  "/keywords"
+# define PREFS_KEYS_ON  PREFS_PROFILES  "/keywords-active"
 
-# define CMD_TTS "tts"
+// default settings {{{2
+# define DEFAULT_ACTIVE         TRUE
+# define DEFAULT_SHELL          "/bin/sh"
+# define DEFAULT_PROFILE        PROFILE_ESPEAK
+
+// profiles
+# define PROFILE_ESPEAK             "espeak"
+# define PROFILE_ESPEAK_COMMAND     "/usr/bin/espeak"
+# define PROFILE_ESPEAK_COMPOSE     "%s -v %s -a %s '%s'"
+# define PROFILE_ESPEAK_LANGUAGE    "de"
+# define PROFILE_ESPEAK_VOLUME      "200"
+# define PROFILE_ESPEAK_REPLACE     NULL
+# define PROFILE_ESPEAK_KEYWORDS    NULL
+# define PROFILE_ESPEAK_KEYS_ON     FALSE
+
+// commands {{{2
+# define CMD_TTS                "tts"
+
+# define CMD_ENABLE             "on"
+# define CMD_DISABLE            "off"
+
+# define CMD_SHELL              "shell"
+# define CMD_BIN                "command"
+# define CMD_COMPOSE            "compose"
+# define CMD_LANGUAGE           "lang"
+# define CMD_REPLACE            "replace"
+# define CMD_VOLUME             "volume"
+# define CMD_EXTRA              "param"
+# define CMD_STATUS             "status"
+# define CMD_PROFILE            "profile"
+# define CMD_TEST               "test"
+# define CMD_SAY                "say"
+
+# define CMD_KEYWORD            "keyword"
+# define CMD_KEYWORD_ENABLE     CMD_ENABLE
+# define CMD_KEYWORD_DISABLE    CMD_DISABLE
+# define CMD_KEYWORD_LIST       "list"
+# define CMD_KEYWORD_ADD        "add"
+# define CMD_KEYWORD_REMOVE     "remove"
+
+# define CMD_CONV               "buddy"
+# define CMD_CONV_ENABLE        CMD_ENABLE
+# define CMD_CONV_DISABLE       CMD_DISABLE
 
 // forward declarations {{{2
 static void ptts_plugin_init(PurplePlugin *plugin);
@@ -93,7 +144,7 @@ static PurplePluginInfo pluginInfo =
     PURPLE_MAJOR_VERSION,
     PURPLE_MINOR_VERSION,
     PURPLE_PLUGIN_STANDARD,                             // type
-    PIDGIN_PLUGIN_TYPE,                                 // ui_requirement
+    NULL,                                               // ui_requirement
     0,                                                  // flags
     NULL,                                               // dependencies
     PURPLE_PRIORITY_DEFAULT,                            // priority
@@ -136,7 +187,7 @@ void systemlog(PurpleConversation *conv, const gchar* format, ...)
     purple_conversation_write(
         conv, NULL, str,
         PURPLE_MESSAGE_SYSTEM | PURPLE_MESSAGE_NO_LOG | PURPLE_MESSAGE_ACTIVE_ONLY,
-        0); /* time(NULL)); */ 
+        0); /* time(NULL)); */
 
     g_free(str);
 }
@@ -184,59 +235,93 @@ GPid spawn(const gchar *cmd, const gchar *opts[], int copts, int *infp, int *out
     return pid;
 }
 
-// Global preferences {{{1
+// Preferences {{{1
+// helpers {{{2
+# define TYPE_bool()          gboolean
+# define TYPE_string_list()   GList*
+# define TYPE_string()        const char*
 
-/* getters {{{2 */
-static gboolean pref_get_active()
-{
-    return purple_prefs_get_bool(PREFS_ACTIVE);
-} 
+# define PP_PRINTF_W(TYPE, ACTION) \
+    static void pp_##ACTION##_##TYPE(TYPE_##TYPE() value, const gchar* format, ...) __attribute__((format(printf,2,3))); \
+    static void pp_##ACTION##_##TYPE(TYPE_##TYPE() value, const gchar* format, ...) \
+    { \
+        va_list ap; \
+        gchar *name; \
+        va_start(ap, format); \
+        name = g_strdup_vprintf(format, ap); \
+        va_end(ap); \
+        purple_prefs_##ACTION##_##TYPE(name, value); \
+        g_free(name); \
+    } \
 
-static const gchar* pref_get_command()
-{
-    return purple_prefs_get_string(PREFS_COMMAND);
-} 
+# define PP_PRINTF(TYPE) \
+    static TYPE_##TYPE() pp_get_##TYPE(const gchar* format, ...) __attribute__((format(printf,1,2))); \
+    static TYPE_##TYPE() pp_get_##TYPE(const gchar* format, ...) \
+    { \
+        va_list ap; \
+        gchar *name; \
+        TYPE_##TYPE() value; \
+        va_start(ap, format); \
+        name = g_strdup_vprintf(format, ap); \
+        va_end(ap); \
+        value = purple_prefs_get_##TYPE(name); \
+        g_free(name); \
+        return value; \
+    } \
+    PP_PRINTF_W(TYPE, set) \
+    PP_PRINTF_W(TYPE, add)
 
-static const gchar* pref_get_shell()
-{
-    return purple_prefs_get_string(PREFS_SHELL);
-}
+# define PP_PROFILE(TYPE) \
+    static TYPE_##TYPE() ppp_get_##TYPE(const gchar* name) \
+    { \
+        return pp_get_##TYPE(name, pref_get_profile()); \
+    } \
+    static void ppp_set_##TYPE(const gchar* name, TYPE_##TYPE() value) \
+    { \
+        pp_set_##TYPE(value, name, pref_get_profile()); \
+    } \
+    static void ppp_add_##TYPE(const gchar* name, TYPE_##TYPE() value) \
+    { \
+        pp_add_##TYPE(value, name, pref_get_profile()); \
+    }
 
-static const gchar* pref_get_param()
-{
-    return purple_prefs_get_string(PREFS_PARAM);
-}
+# define PP_ITEM(PREFIX, NAME, PATH, TYPE) \
+    static TYPE_##TYPE() pref_get_##NAME() \
+    { \
+        return PREFIX##_get_##TYPE(PATH); \
+    } \
+    static void pref_set_##NAME(TYPE_##TYPE() value) \
+    { \
+        PREFIX##_set_##TYPE(PATH, value); \
+    } \
+    static void pref_add_##NAME(TYPE_##TYPE() value) \
+    { \
+        PREFIX##_add_##TYPE(PATH, value); \
+    }
 
-static gboolean pref_get_keywords_active()
-{
-    return purple_prefs_get_bool(PREFS_KEYS_ON);
-}
+# define PP_PP(TYPE) \
+    PP_PRINTF(TYPE) \
+    PP_PROFILE(TYPE)
 
-/* setters {{{2 */
-static void pref_set_active(gboolean active)
-{
-    purple_prefs_set_bool(PREFS_ACTIVE, active);
-}
+// purple prefs {{{2
+PP_ITEM(purple_prefs, profile, PREFS_PROFILE, string);
 
-static void pref_set_command(const gchar* cmd)
-{
-    purple_prefs_set_string(PREFS_COMMAND, cmd);
-}
+PP_PP(string);
+PP_PP(bool);
+PP_PP(string_list);
 
-static void pref_set_shell(const gchar* sh)
-{
-    purple_prefs_set_string(PREFS_SHELL, sh);
-}
+PP_ITEM(purple_prefs, active,   PREFS_ACTIVE,   bool);
+PP_ITEM(purple_prefs, shell,    PREFS_SHELL,    string);
 
-static void pref_set_param(const gchar* param)
-{
-    purple_prefs_set_string(PREFS_PARAM, param);
-}
+PP_ITEM(ppp, command,           PREFS_COMMAND,  string);
+PP_ITEM(ppp, compose,           PREFS_COMPOSE,  string);
+PP_ITEM(ppp, language,          PREFS_LANGUAGE, string);
+PP_ITEM(ppp, volume,            PREFS_VOLUME,   string);
 
-static void pref_set_keywords_active(gboolean active)
-{
-    purple_prefs_set_bool(PREFS_KEYS_ON, active);
-}
+PP_ITEM(ppp, keywords_active,   PREFS_KEYS_ON,  bool);
+PP_ITEM(ppp, keywords,          PREFS_KEYWORDS, string_list);
+
+PP_ITEM(ppp, replacement,       PREFS_REPLACE,  string_list);
 
 /* logging {{{2 */
 static void pref_log_active(PurpleConversation *conv)
@@ -255,6 +340,14 @@ static void pref_log_shell(PurpleConversation *conv)
             pref_get_shell());
 }
 
+static void pref_log_profile(PurpleConversation *conv)
+{
+    systemlog(conv,
+            "%s profile is: %s",
+            PLUGIN_NAME,
+            pref_get_profile());
+}
+
 static void pref_log_command(PurpleConversation *conv)
 {
     systemlog(conv,
@@ -263,12 +356,28 @@ static void pref_log_command(PurpleConversation *conv)
             pref_get_command());
 }
 
-static void pref_log_param(PurpleConversation *conv)
+static void pref_log_compose(PurpleConversation *conv)
 {
     systemlog(conv,
             "%s parameters are: %s",
             PLUGIN_NAME,
-            pref_get_param());
+            pref_get_compose());
+}
+
+static void pref_log_language(PurpleConversation *conv)
+{
+    systemlog(conv,
+            "%s language is: %s",
+            PLUGIN_NAME,
+            pref_get_language());
+}
+
+static void pref_log_volume(PurpleConversation *conv)
+{
+    systemlog(conv,
+            "%s volume is: %s",
+            PLUGIN_NAME,
+            pref_get_volume());
 }
 
 static void pref_log_keywords_active(PurpleConversation *conv)
@@ -283,34 +392,34 @@ static void pref_log_keywords_active(PurpleConversation *conv)
 // Keyword management {{{1
 static void pref_delete_keyword(const gchar* keyword)
 {
-    GList *table = purple_prefs_get_string_list(PREFS_KEYWORDS),
+    GList *table = pref_get_keywords(),
           *match = list_find(table, keyword, 1);
     if (match != NULL) {
         g_free(g_list_nth_data(match, 0));
         table = g_list_delete_link(table, match);
-        purple_prefs_set_string_list(PREFS_KEYWORDS, table);
+        pref_set_keywords(table);
     }
 }
 
 static void pref_add_keyword(const gchar* keyword)
 {
-    GList *table = purple_prefs_get_string_list(PREFS_KEYWORDS),
+    GList *table = pref_get_keywords(),
           *match = list_find(table, keyword, 1);
     if (match == NULL) {
         table = g_list_prepend(table, g_strdup(keyword));
-        purple_prefs_set_string_list(PREFS_KEYWORDS, table);
+        pref_set_keywords(table);
     }
 }
 
 static void pref_log_keywords(PurpleConversation *conv)
 {
     gchar *tmp, *str;
-    GList *table = purple_prefs_get_string_list(PREFS_KEYWORDS);
+    GList *table = pref_get_keywords();
     table = g_list_first(table);
 
     if (table == NULL)
         str = g_strdup(PLUGIN_NAME " active keywords: (none)");
-    else { 
+    else {
         str = g_strjoin("", PLUGIN_NAME " active keywords: ", g_list_nth_data(table, 0), NULL);
         for (table = g_list_next(table); table != NULL; table = g_list_next(table)) {
             tmp = g_strjoin("", str, ", ", g_list_nth_data(table, 0), NULL);
@@ -323,18 +432,17 @@ static void pref_log_keywords(PurpleConversation *conv)
     g_free(str);
 }
 
-
 // Replacement table {{{1
 static void pref_delete_replace(const gchar* pattern)
 {
-    GList *table = purple_prefs_get_string_list(PREFS_REPLACE),
+    GList *table = pref_get_replacement(),
           *match = list_find(table, pattern, 2);
     if (match != NULL) {
         g_free(g_list_nth_data(match, 1));
         g_free(g_list_nth_data(match, 0));
         table = g_list_delete_link(table, g_list_nth(match, 1));
         table = g_list_delete_link(table, g_list_nth(match, 0));
-        purple_prefs_set_string_list(PREFS_REPLACE, table);
+        pref_set_replacement(table);
     }
 }
 
@@ -342,16 +450,16 @@ static void pref_add_replace(const gchar* pattern, const gchar* replace)
 {
     GList *table;
     pref_delete_replace(pattern);
-    table = purple_prefs_get_string_list(PREFS_REPLACE);
-    table = g_list_prepend(table, g_strdup(replace)); 
-    table = g_list_prepend(table, g_strdup(pattern)); 
-    purple_prefs_set_string_list(PREFS_REPLACE, table);
+    table = pref_get_replacement();
+    table = g_list_prepend(table, g_strdup(replace));
+    table = g_list_prepend(table, g_strdup(pattern));
+    pref_set_replacement(table);
 }
 
 static void pref_log_replace(PurpleConversation *conv)
 {
     gchar *tmp, *str = g_strdup(PLUGIN_NAME " active replacements:");
-    GList *table = purple_prefs_get_string_list(PREFS_REPLACE);
+    GList *table = pref_get_replacement();
 
     for (table = g_list_first(table); table != NULL; table = g_list_nth(table, 2)) {
         tmp = g_strjoin("", str, "\n", (const gchar*) g_list_nth_data(table, 0), " => ", (const gchar*) g_list_nth_data(table, 1), NULL);
@@ -368,12 +476,12 @@ static void pref_log_replace(PurpleConversation *conv)
 static gboolean conv_get_active(PurpleConversation *conv)
 {
     return g_list_find(active_conversations, conv) != NULL;
-} 
+}
 
 static gboolean conv_get_inactive(PurpleConversation *conv)
 {
     return g_list_find(inactive_conversations, conv) != NULL;
-} 
+}
 
 /* setters {{{2 */
 static void conv_set_active(PurpleConversation *conv, gboolean active);
@@ -408,7 +516,7 @@ static void conv_log_active(PurpleConversation *conv) {
                 conv_get_active(conv) ? "enabled" : "disabled");
     else
         systemlog(conv,
-                "%s uses the default setting (%s) for this conversation", 
+                "%s uses the default setting (%s) for this conversation",
                 PLUGIN_NAME,
                 pref_get_active() ? "enabled" : "disabled");
 }
@@ -419,14 +527,14 @@ static gboolean analyse(const gchar* _buffer, gchar **text)
 {
     GList* table;
     gchar *buffer, *tmpbuffer;
-    
+
     // copy buffer and remove <html-tags>, apostrophes \', and newlines \n
     buffer = purple_markup_strip_html(_buffer);
     purple_str_strip_char(buffer, '\'');
     purple_str_strip_char(buffer, '\n');
 
     // replace
-    table = purple_prefs_get_string_list(PREFS_REPLACE);
+    table = pref_get_replacement();
 
     for (table = g_list_first(table); table != NULL; table = g_list_nth(table, 2)) {
         tmpbuffer = purple_strreplace(buffer, g_list_nth_data(table, 0), g_list_nth_data(table, 1));
@@ -444,9 +552,10 @@ static gboolean tts(PurpleConversation *conv, gchar *message)
     purple_debug_info(PLUGIN_NAME, "Echoing: '%s'\n", message);
 
     int written = dprintf(ptts_queue_stdin,
-        "%s %s '%s'\n",
+        pref_get_compose(),
         pref_get_command(),
-        pref_get_param(),
+        pref_get_language(),
+        pref_get_volume(),
         message);
 
     if (written < 0) {
@@ -469,7 +578,7 @@ static gboolean process_message(PurpleConversation *conv, const gchar* message)
 
     if (!conv_get_active(conv) && !pref_get_active()) {
         if (pref_get_keywords_active()) {
-            keywords = purple_prefs_get_string_list(PREFS_KEYWORDS);
+            keywords = pref_get_keywords();
             for (keywords = g_list_first(keywords); keywords; keywords = g_list_next(keywords)) {
                 if (g_strstr_len(message, -1, g_list_nth_data(keywords, 0)) != NULL) {
                     keyword_found = TRUE;
@@ -503,7 +612,7 @@ static PurpleCmdRet ptts_command_keyword(
         gchar **error,
         void *data)
 {
-    if (args[0] == NULL || !purple_strequal(args[0], "keyword"))
+    if (args[0] == NULL || !purple_strequal(args[0], CMD_KEYWORD))
         return PURPLE_CMD_RET_CONTINUE;
 
     else if (args[1] == NULL)   // list all keywords
@@ -511,16 +620,16 @@ static PurpleCmdRet ptts_command_keyword(
 
     else if (args[2] == NULL)
     {
-        if (purple_strequal(args[1], "on")) {
+        if (purple_strequal(args[1], CMD_KEYWORD_ENABLE)) {
             pref_set_keywords_active(TRUE);
             pref_log_keywords_active(conv);
         }
-        else if (purple_strequal(args[1], "off")) {
+        else if (purple_strequal(args[1], CMD_KEYWORD_DISABLE)) {
             pref_set_keywords_active(FALSE);
             pref_log_keywords_active(conv);
         }
 
-        else if (purple_strequal(args[1], "list"))
+        else if (purple_strequal(args[1], CMD_KEYWORD_LIST))
             pref_log_keywords(conv);
 
         else
@@ -528,10 +637,10 @@ static PurpleCmdRet ptts_command_keyword(
     }
     else
     {
-        if (purple_strequal(args[1], "add"))
+        if (purple_strequal(args[1], CMD_KEYWORD_ADD))
             pref_add_keyword(args[2]);
 
-        else if (purple_strequal(args[1], "remove"))
+        else if (purple_strequal(args[1], CMD_KEYWORD_REMOVE))
             pref_delete_keyword(args[2]);
 
         else
@@ -548,7 +657,7 @@ static PurpleCmdRet ptts_command_replace(
         gchar **error,
         void *data)
 {
-    if (args[0] == NULL || !purple_strequal(args[0], "replace"))
+    if (args[0] == NULL || !purple_strequal(args[0], CMD_REPLACE))
         return PURPLE_CMD_RET_CONTINUE;
 
     if (args[1] == NULL)
@@ -578,13 +687,13 @@ static PurpleCmdRet ptts_command_conv(
         gchar **error,
         void *data)
 {
-    if (args[0] == NULL || !purple_strequal(args[0], "buddy"))
+    if (args[0] == NULL || !purple_strequal(args[0], CMD_CONV))
         return PURPLE_CMD_RET_CONTINUE;
 
     if (args[1] == NULL)
         conv_log_active(conv);
 
-    else if (purple_strequal(args[1], "on")) {
+    else if (purple_strequal(args[1], CMD_CONV_ENABLE)) {
         if (conv_get_inactive(conv) && pref_get_active())
             conv_set_inactive(conv, FALSE);
         else
@@ -592,7 +701,7 @@ static PurpleCmdRet ptts_command_conv(
         conv_log_active(conv);
     }
 
-    else if (purple_strequal(args[1], "off")) {
+    else if (purple_strequal(args[1], CMD_CONV_DISABLE)) {
         if (conv_get_active(conv) && !pref_get_active())
             conv_set_active(conv, FALSE);
         else
@@ -622,33 +731,33 @@ static PurpleCmdRet ptts_command(
     {
         if (args[1] == NULL)
         {
-            if (purple_strequal(args[0], "on")) {
+            if (purple_strequal(args[0], CMD_ENABLE)) {
                 pref_set_active(TRUE);
                 conv_set_inactive(conv, FALSE);
                 pref_log_active(conv);
             }
 
-            else if (purple_strequal(args[0], "off")) {
+            else if (purple_strequal(args[0], CMD_DISABLE)) {
                 pref_set_active(FALSE);
                 conv_set_active(conv, FALSE);
                 pref_log_active(conv);
             }
 
-            else if (purple_strequal(args[0], "shell"))
+            else if (purple_strequal(args[0], CMD_SHELL))
                 pref_log_shell(conv);
 
-            else if (purple_strequal(args[0], "command"))
+            else if (purple_strequal(args[0], CMD_BIN))
                 pref_log_command(conv);
 
-            else if (purple_strequal(args[0], "param"))
-                pref_log_param(conv);
+            else if (purple_strequal(args[0], CMD_COMPOSE))
+                pref_log_compose(conv);
 
-            else if (purple_strequal(args[0], "status")) {
+            else if (purple_strequal(args[0], CMD_STATUS)) {
                 pref_log_active(conv);
                 conv_log_active(conv);
                 pref_log_shell(conv);
                 pref_log_command(conv);
-                pref_log_param(conv);
+                pref_log_compose(conv);
                 pref_log_keywords_active(conv);
                 pref_log_keywords(conv);
                 pref_log_replace(conv);
@@ -659,22 +768,37 @@ static PurpleCmdRet ptts_command(
         }
         else
         {
-            if (purple_strequal(args[0], "shell")) {
+            if (purple_strequal(args[0], CMD_SHELL)) {
                 pref_set_shell(args[1]);
                 pref_log_shell(conv);
             }
 
-            else if (purple_strequal(args[0], "command")) {
+            else if (purple_strequal(args[0], CMD_PROFILE)) {
+                pref_set_profile(args[1]);
+                pref_log_profile(conv);
+            }
+
+            else if (purple_strequal(args[0], CMD_BIN)) {
                 pref_set_command(args[1]);
                 pref_log_command(conv);
             }
 
-            else if (purple_strequal(args[0], "param")) {
-                pref_set_param(args[1]);
-                pref_log_param(conv);
+            else if (purple_strequal(args[0], CMD_COMPOSE)) {
+                pref_set_compose(args[1]);
+                pref_log_compose(conv);
             }
 
-            else if (purple_strequal(args[0], "say")) {
+            else if (purple_strequal(args[0], CMD_LANGUAGE)) {
+                pref_set_language(args[1]);
+                pref_log_language(conv);
+            }
+
+            else if (purple_strequal(args[0], CMD_VOLUME)) {
+                pref_set_volume(args[1]);
+                pref_log_volume(conv);
+            }
+
+            else if (purple_strequal(args[0], CMD_SAY)) {
                 gchar* text;
                 if (analyse(args[1], &text)) {
                     tts(conv, text);
@@ -682,8 +806,8 @@ static PurpleCmdRet ptts_command(
                 }
             }
 
-            else if (purple_strequal(args[0], "test")) {
-                if (process_message(conv, args[1])) 
+            else if (purple_strequal(args[0], CMD_TEST)) {
+                if (process_message(conv, args[1]))
                     systemlog(conv,
                             "%s - echoing test string...",
                             PLUGIN_NAME);
@@ -704,18 +828,19 @@ static PurpleCmdRet ptts_command(
 static void ptts_plugin_init(PurplePlugin *plugin)
 {
     purple_prefs_add_none(PREFS_BASE);
-    purple_prefs_add_bool(PREFS_ACTIVE, FALSE);
-    purple_prefs_add_string(PREFS_PARAM, "-v de -a 200");
 
-    purple_prefs_add_string(PREFS_LANGUAGE, DEFAULT_LANGUAGE);
-    purple_prefs_add_string(PREFS_VOLUME,   DEFAULT_VOLUME);
+    pref_add_active(DEFAULT_ACTIVE);
+    pref_add_shell(DEFAULT_SHELL);
+    pref_add_profile(DEFAULT_PROFILE);
 
-    purple_prefs_add_string_list(PREFS_REPLACE, NULL);
-    purple_prefs_add_string_list(PREFS_KEYWORDS, NULL);
-    purple_prefs_add_bool(PREFS_KEYS_ON, FALSE);
+    pref_add_command(PROFILE_ESPEAK_COMMAND);
+    pref_add_compose(PROFILE_ESPEAK_COMPOSE);
+    pref_add_language(PROFILE_ESPEAK_LANGUAGE);
+    pref_add_volume(PROFILE_ESPEAK_VOLUME);
 
-    purple_prefs_add_string(PREFS_SHELL,   DEFAULT_SHELL);
-    purple_prefs_add_string(PREFS_COMMAND, DEFAULT_TTS);
+    pref_add_replacement(PROFILE_ESPEAK_REPLACE);
+    pref_add_keywords(PROFILE_ESPEAK_KEYWORDS);
+    pref_add_keywords_active(PROFILE_ESPEAK_KEYS_ON);
 }
 
 static gboolean ptts_plugin_load(PurplePlugin *plugin)
@@ -724,7 +849,7 @@ static gboolean ptts_plugin_load(PurplePlugin *plugin)
     gchar
         *info_keyword = "/"CMD_TTS" keyword [add &lt;keyword&gt; | remove &lt;keyword&gt;]",
         *info_replace = "/"CMD_TTS" replace &lt;word&gt; &lt;replacement&gt;",
-        *info = "/"CMD_TTS" [on | off | param &lt;parameters&gt; | shell &lt;path&gt; | command &lt;path&gt; | say &lt;text&gt; | status]",
+        *info = "/"CMD_TTS" [on | off | compose &lt;command line composition&gt; | shell &lt;path&gt; | command &lt;path&gt; | say &lt;text&gt; | status]",
         *info_stts = "/"CMD_TTS" buddy [on | off]";
 
     PurpleCmdFlag flags =
@@ -736,44 +861,44 @@ static gboolean ptts_plugin_load(PurplePlugin *plugin)
 
     // start child process
     ptts_queue_pid = spawn(pref_get_shell(), NULL, 0, &ptts_queue_stdin, NULL);
- 
+
     // register command handlers
     ptts_command_id_global = purple_cmd_register(
-            CMD_TTS,                              /* command name */ 
-            "ws",                               /* command argument format */
-            PURPLE_CMD_P_DEFAULT,               /* command priority flags */  
-            flags,                              /* command usage flags */
-            PLUGIN_ID,                          /* Plugin ID */
-            ptts_command,                        /* Name of the callback function */
-            info,                               /* Help message */
-            NULL );                             /* Any special user-defined data */
+            CMD_TTS,                            // command name
+            "ws",                               // command argument format
+            PURPLE_CMD_P_DEFAULT,               // command priority flags
+            flags,                              // command usage flags
+            PLUGIN_ID,                          // Plugin ID
+            ptts_command,                       // Name of the callback function
+            info,                               // Help message
+            NULL );                             // Any special user-defined data
     ptts_command_id_conversation = purple_cmd_register(
-            CMD_TTS,                              /* command name: stts = single tts */ 
-            "wws",                              /* command argument format */
-            PURPLE_CMD_P_DEFAULT,               /* command priority flags */  
-            flags,                              /* command usage flags */
-            PLUGIN_ID,                          /* Plugin ID */
-            ptts_command_conv,                   /* Name of the callback function */
-            info_stts,                          /* Help message */
-            NULL );                             /* Any special user-defined data */
+            CMD_TTS,                            // command name: stts = single tts
+            "wws",                              // command argument format
+            PURPLE_CMD_P_DEFAULT,               // command priority flags
+            flags,                              // command usage flags
+            PLUGIN_ID,                          // Plugin ID
+            ptts_command_conv,                  // Name of the callback function
+            info_stts,                          // Help message
+            NULL );                             // Any special user-defined data
     ptts_command_id_keyword = purple_cmd_register(
-            CMD_TTS,                              /* command name */ 
-            "wws",                              /* command argument format */
-            PURPLE_CMD_P_DEFAULT,               /* command priority flags */  
-            flags,                              /* command usage flags */
-            PLUGIN_ID,                          /* Plugin ID */
-            ptts_command_keyword,                /* Name of the callback function */
-            info_keyword,                       /* Help message */
-            NULL );                             /* Any special user-defined data */
+            CMD_TTS,                            // command name
+            "wws",                              // command argument format
+            PURPLE_CMD_P_DEFAULT,               // command priority flags
+            flags,                              // command usage flags
+            PLUGIN_ID,                          // Plugin ID
+            ptts_command_keyword,               // Name of the callback function
+            info_keyword,                       // Help message
+            NULL );                             // Any special user-defined data
     ptts_command_id_replace = purple_cmd_register(
-            CMD_TTS,                              /* command name */ 
-            "wws",                              /* command argument format */
-            PURPLE_CMD_P_DEFAULT,               /* command priority flags */  
-            flags,                              /* command usage flags */
-            PLUGIN_ID,                          /* Plugin ID */
-            ptts_command_replace,                /* Name of the callback function */
-            info_replace,                       /* Help message */
-            NULL );                             /* Any special user-defined data */
+            CMD_TTS,                            // command name
+            "wws",                              // command argument format
+            PURPLE_CMD_P_DEFAULT,               // command priority flags
+            flags,                              // command usage flags
+            PLUGIN_ID,                          // Plugin ID
+            ptts_command_replace,               // Name of the callback function
+            info_replace,                       // Help message
+            NULL );                             // Any special user-defined data
 
 
     // TODO: add commands to show/edit replacement table !!

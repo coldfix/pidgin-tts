@@ -48,7 +48,7 @@ $(PIDGIN_ESPEAK).so: $(PIDGIN_ESPEAK).o
 	$(CC) $(LDFLAGS) -shared $(CFLAGS) $< -o $@ $(PIDGIN_LIBS) $(GTK_LIBS) -Wl,--export-dynamic -Wl,-soname
 
 $(PIDGIN_ESPEAK).o:$(PIDGIN_ESPEAK).c
-	$(CC) $(CFLAGS) -fPIC -c $< -o $@ $(PIDGIN_CFLAGS) $(GTK_CFLAGS) -DHAVE_CONFIG_H
+	$(CC) $(CFLAGS) -fPIC -Wall -c $< -o $@ $(PIDGIN_CFLAGS) $(GTK_CFLAGS) -DHAVE_CONFIG_H
 
 clean:
 	rm -rf *.o *.c~ *.h~ *.so *.la .libs
