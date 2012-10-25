@@ -77,7 +77,7 @@
 // profiles
 # define PROFILE_ESPEAK             "espeak"
 # define PROFILE_ESPEAK_COMMAND     "/usr/bin/espeak"
-# define PROFILE_ESPEAK_COMPOSE     "%s -v %s -a %s '%s'"
+# define PROFILE_ESPEAK_COMPOSE     "%s -v %s -a %s '%s' %s"
 # define PROFILE_ESPEAK_LANGUAGE    "de"
 # define PROFILE_ESPEAK_VOLUME      "200"
 # define PROFILE_ESPEAK_REPLACE     NULL
@@ -359,7 +359,7 @@ static void pref_log_command(PurpleConversation *conv)
 static void pref_log_compose(PurpleConversation *conv)
 {
     systemlog(conv,
-            "%s parameters are: %s",
+            "%s command line is composed as: %s",
             PLUGIN_NAME,
             pref_get_compose());
 }
@@ -556,7 +556,8 @@ static gboolean tts(PurpleConversation *conv, gchar *message)
         pref_get_command(),
         pref_get_language(),
         pref_get_volume(),
-        message);
+        message,
+        "\n");
 
     if (written < 0) {
         purple_debug_error(PLUGIN_NAME, "Error while executing %s: '%s'\n", pref_get_command(), strerror(errno));
@@ -832,6 +833,10 @@ static void ptts_plugin_init(PurplePlugin *plugin)
     pref_add_active(DEFAULT_ACTIVE);
     pref_add_shell(DEFAULT_SHELL);
     pref_add_profile(DEFAULT_PROFILE);
+
+    char* str = g_strdup_printf(PREFS_PROFILES, PROFILE_ESPEAK);
+    purple_prefs_add_none(str);
+    g_free(str);
 
     pref_add_command(PROFILE_ESPEAK_COMMAND);
     pref_add_compose(PROFILE_ESPEAK_COMPOSE);
