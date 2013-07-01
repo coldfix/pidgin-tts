@@ -1,0 +1,8 @@
+lib pidgin : : <name>pidgin ;
+lib gtk : : <name>gtk+-2.0 ;
+
+lib pidgin-tts
+    : pidgin-tts.c
+    : <cflags>"`pkg-config --cflags pidgin`"
+      <linkflags>"`pkg-config --libs pidgin`"
+    ;
