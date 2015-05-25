@@ -277,7 +277,6 @@ gchar* detect_language()
         *enc = 0;
     }
 
-    g_ascii_strdown(lang, -1);
     gchar* region = g_strstr_len(lang, -1, "_");
     if (region) {
         *region = '-';
@@ -294,6 +293,7 @@ gchar* detect_language()
         }
     }
 
+    free(lang);
     return g_strdup("en");
 }
 
