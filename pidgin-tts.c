@@ -262,9 +262,6 @@ gboolean is_valid_language(const char* lang)
 
     free(argv);
 
-    printf("Detecting: is_valid_language(%s) = %d, %d\n",
-            lang, success, exit_status);
-
     return success && exit_status == 0;
 }
 
