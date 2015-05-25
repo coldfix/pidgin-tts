@@ -235,6 +235,69 @@ GPid spawn(const gchar *cmd, const gchar *opts[], int copts, int *infp, int *out
     return pid;
 }
 
+
+gboolean is_valid_language(const char* lang)
+{
+    gchar** argv = malloc(4*sizeof(gchar*));
+    argv[0] = "espeak";
+    argv[1] = "-v";
+    argv[2] = lang;
+    argv[3] = NULL;
+
+    gint exit_status;
+    gboolean success = g_spawn_sync(
+            NULL,       // inherit cwd
+            argv,
+            NULL,       // inherit env
+            G_SPAWN_SEARCH_PATH
+                | G_SPAWN_STDERR_TO_DEV_NULL
+                | G_SPAWN_STDOUT_TO_DEV_NULL,
+            NULL,       // SetupFunc
+            NULL,       // userdata
+            NULL,       // stdout
+            NULL,       // stderr
+            &exit_status,
+            NULL        // error
+        );
+
+    free(argv);
+
+    printf("Detecting: is_valid_language(%s) = %d, %d\n",
+            lang, success, exit_status);
+
+    return success && exit_status == 0;
+}
+
+gchar* detect_language()
+{
+    gchar* lang = g_ascii_strdown(getenv("LANG"), -1);
+
+    gchar* enc = g_strstr_len(lang, -1, ".");
+    if (enc) {
+        *enc = 0;
+    }
+
+    g_ascii_strdown(lang, -1);
+    gchar* region = g_strstr_len(lang, -1, "_");
+    if (region) {
+        *region = '-';
+    }
+
+    if (is_valid_language(lang)) {
+        return lang;
+    }
+
+    if (region) {
+        *region = 0;
+        if (is_valid_language(lang)) {
+            return lang;
+        }
+    }
+
+    return g_strdup("en");
+}
+
+
 // Preferences {{{1
 // helpers {{{2
 # define TYPE_bool()          gboolean
@@ -840,7 +903,11 @@ static void ptts_plugin_init(PurplePlugin *plugin)
 
     pref_add_command(PROFILE_ESPEAK_COMMAND);
     pref_add_compose(PROFILE_ESPEAK_COMPOSE);
-    pref_add_language(PROFILE_ESPEAK_LANGUAGE);
+
+    gchar* language = detect_language();
+    pref_add_language(language);
+    free(language);
+
     pref_add_volume(PROFILE_ESPEAK_VOLUME);
 
     pref_add_replacement(PROFILE_ESPEAK_REPLACE);
