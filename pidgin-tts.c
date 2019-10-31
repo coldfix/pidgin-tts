@@ -1,7 +1,7 @@
 /*
  * File:        pidgin-tts.c
  * Author:      Thomas Gläßle
- * Version:     1.1
+ * Version:     1.2
  * License:     free
  *
  * Description:
@@ -151,7 +151,7 @@ static PurplePluginInfo pluginInfo =
 
     PLUGIN_ID,                                          // id
     PLUGIN_NAME,                                        // name
-    "1.1",                                              // version
+    "1.2",                                              // version
     "Read incoming text messages.",                     // summary
     "Reads incoming text messages via espeak.",         // detailed description
     "Thomas Gläßle <t_glaessle@gmx.de>",                // author
