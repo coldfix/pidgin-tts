@@ -32,11 +32,8 @@ endif
 
 PIDGIN_ESPEAK = pidgin-tts
 
-PIDGIN_CFLAGS   = $(shell pkg-config pidgin   --cflags)
-GTK_CFLAGS      = $(shell pkg-config gtk+-2.0 --cflags)
-PIDGIN_LIBS     = $(shell pkg-config pidgin   --libs)
-GTK_LIBS        = $(shell pkg-config gtk+-2.0 --libs)
-PIDGIN_LIBDIR   = $(shell pkg-config --variable=libdir pidgin)/pidgin
+CFLAGS = $(shell pkg-config --cflags pidgin gtk+-2.0)
+LDLIBS = $(shell pkg-config --libs pidgin gtk+-2.0)
 
 all: $(PIDGIN_ESPEAK).so
 
@@ -45,10 +42,10 @@ install: all
 	cp $(PIDGIN_ESPEAK).so $(LIB_INSTALL_DIR)
 
 $(PIDGIN_ESPEAK).so: $(PIDGIN_ESPEAK).o
-	$(CC) $(LDFLAGS) -shared $(CFLAGS) $< -o $@ $(PIDGIN_LIBS) $(GTK_LIBS) -Wl,--export-dynamic -Wl,-soname
+	$(CC) $(LDFLAGS) -shared $< -o $@ $(LDLIBS) -Wl,--export-dynamic -Wl,-soname
 
 $(PIDGIN_ESPEAK).o:$(PIDGIN_ESPEAK).c
-	$(CC) $(CFLAGS) -fPIC -Wall -c $< -o $@ $(PIDGIN_CFLAGS) $(GTK_CFLAGS) -DHAVE_CONFIG_H
+	$(CC) $(CFLAGS) -fPIC -Wall -c $< -o $@ -DHAVE_CONFIG_H
 
 clean:
 	rm -rf *.o *.c~ *.h~ *.so *.la .libs
