@@ -30,21 +30,21 @@ else
   LIB_INSTALL_DIR = $(PREFIX)/lib/pidgin
 endif
 
-PIDGIN_ESPEAK = pidgin-tts
+NAME = pidgin-tts
 
 CFLAGS = $(shell pkg-config --cflags pidgin gtk+-2.0)
 LDLIBS = $(shell pkg-config --libs pidgin gtk+-2.0)
 
-all: $(PIDGIN_ESPEAK).so
+all: $(NAME).so
 
 install: all
 	mkdir -p $(LIB_INSTALL_DIR)
-	cp $(PIDGIN_ESPEAK).so $(LIB_INSTALL_DIR)
+	cp $(NAME).so $(LIB_INSTALL_DIR)
 
-$(PIDGIN_ESPEAK).so: $(PIDGIN_ESPEAK).o
+$(NAME).so: $(NAME).o
 	$(CC) $(LDFLAGS) -shared $< -o $@ $(LDLIBS) -Wl,--export-dynamic -Wl,-soname
 
-$(PIDGIN_ESPEAK).o:$(PIDGIN_ESPEAK).c
+$(NAME).o:$(NAME).c
 	$(CC) $(CFLAGS) -fPIC -Wall -c $< -o $@ -DHAVE_CONFIG_H
 
 clean:
