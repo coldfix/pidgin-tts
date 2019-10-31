@@ -241,7 +241,7 @@ gboolean is_valid_language(const char* lang)
     gchar** argv = malloc(4*sizeof(gchar*));
     argv[0] = "espeak";
     argv[1] = "-v";
-    argv[2] = lang;
+    argv[2] = (char*) lang;
     argv[3] = NULL;
 
     gint exit_status;
