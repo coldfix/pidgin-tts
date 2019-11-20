@@ -1,30 +1,36 @@
-## pidgin-tts
+# pidgin-tts
 
-### Description
+## Description
 
 This is a plugin for Pidgin-IM which can be used to automatically read incoming messages via an installed TTS (text-to-speech) application.
 
-### Features
+## Features
 
-### Limitations
+## Limitations
 
 The program
 
 * is tested on Linux only (and will probably not compile elsewhere)
 * is designed for use with the `espeak` program. I don't know which other TTS applications it may support
 
-### Installation
+## Installation
 
-Build and install the plugin with the commands
+First you'll need pidgin installed with all dependencies.
 
-    make && make install
+Then install the `espeak` utlity.
+
+Then install pidgin's build tools, which are `pidgin-dev` and `libpurple-dev` for Ubuntu/Debian systems or `pidgin-devel` and `libpurple-devel` for CentOS/Arch Linux.
+
+Build and install the plugin with the commands:
+
+```bash
+make && make install
+```
 
 This will compile the code and - in a second step - copy generated shared object to your `~/.purple/plugins/` directory.
 Afterwards you have to enable the plugin in your Pidgin options.
 
-Make sure to have the `espeak` utility installed on your system.
-
-### Commands
+## Commands
 
 The plugin is controlled from within the message window.
 All commands are prefixed by `/tts`. For example
